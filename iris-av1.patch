@@ -1,0 +1,1004 @@
+diff --git a/drivers/media/platform/qcom/vcodec/iris/hfi_defines.h b/drivers/media/platform/qcom/vcodec/iris/hfi_defines.h
+index bcaa0ea1c..3995b4b88 100644
+--- a/drivers/media/platform/qcom/vcodec/iris/hfi_defines.h
++++ b/drivers/media/platform/qcom/vcodec/iris/hfi_defines.h
+@@ -68,6 +68,7 @@ enum hfi_codec_type {
+ 	HFI_CODEC_DECODE_HEVC	= 3,
+ 	HFI_CODEC_ENCODE_HEVC	= 4,
+ 	HFI_CODEC_DECODE_VP9	= 5,
++	HFI_CODEC_DECODE_AV1	= 7,
+ };
+ 
+ #define HFI_PROP_CODEC				0x03000100
+@@ -303,6 +304,15 @@ enum hfi_picture_type {
+ 
+ #define HFI_PROP_COMV_BUFFER_COUNT		0x03000193
+ 
++#define HFI_PROP_WORST_COMPRESSION_RATIO	0x03000174
++#define HFI_PROP_WORST_COMPLEXITY_FACTOR	0x03000175
++#define HFI_PROP_AV1_FILM_GRAIN_PRESENT	0x03000180
++#define HFI_PROP_AV1_SUPER_BLOCK_ENABLED	0x03000181
++#define HFI_PROP_AV1_OP_POINT			0x03000182
++#define HFI_PROP_AV1_TILE_ROWS_COLUMNS		0x03000187
++#define HFI_PROP_AV1_DRAP_CONFIG		0x03000189
++#define HFI_PROP_AV1_UNIFORM_TILE_SPACING	0x03000197
++
+ #define HFI_PROP_END				0x03FFFFFF
+ 
+ #define HFI_SESSION_ERROR_BEGIN			0x04000000
+diff --git a/drivers/media/platform/qcom/vcodec/iris/iris_av1_buffer.h b/drivers/media/platform/qcom/vcodec/iris/iris_av1_buffer.h
+new file mode 100644
+index 000000000..7a09daeb0
+--- /dev/null
++++ b/drivers/media/platform/qcom/vcodec/iris/iris_av1_buffer.h
+@@ -0,0 +1,370 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * AV1 formulas from Qualcomm's Iris AV1 decoder v9 series, patch 5/5.
++ * Author: Deepa Guthyappa Madivalara, Qualcomm.
++ * Adapted for Valve's Iris driver as a compilation experiment.
++ */
++#ifndef _IRIS_AV1_BUFFER_H_
++#define _IRIS_AV1_BUFFER_H_
++
++#define AV1_CABAC_HDR_RATIO_HD_TOT 2
++#define AV1_CABAC_RES_RATIO_HD_TOT 2
++#define AV1D_LCU_MAX_SIZE_PELS 128
++#define AV1D_LCU_MIN_SIZE_PELS 64
++#define AV1D_MAX_TILE_COLS     64
++#define MAX_PE_NBR_DATA_LCU32_LINE_BUFFER_SIZE 192
++#define MAX_PE_NBR_DATA_LCU16_LINE_BUFFER_SIZE 96
++#define AV1D_NUM_HW_PIC_BUF    16
++#define AV1D_NUM_FRAME_HEADERS 16
++#define SIZE_AV1D_SEQUENCE_HEADER 768
++#define SIZE_AV1D_METADATA        512
++#define SIZE_AV1D_FRAME_HEADER    1280
++#define SIZE_AV1D_TILE_OFFSET     65536
++#define SIZE_AV1D_QM              3328
++#define SIZE_AV1D_PROB_TABLE      22784
++
++#define BITS_PER_PIX                   16
++#define NUM_LINES_LUMA                 10
++#define NUM_LINES_CHROMA               6
++#define BITS_PER_CTRL_PACK             128
++#define NUM_CTRL_PACK_LCU              10
++
++static inline u32 size_av1d_lb_fe_top_data(u32 frame_width, u32 frame_height)
++{
++	return (ALIGN(frame_width, AV1D_LCU_MAX_SIZE_PELS) *
++		((BITS_PER_PIX * NUM_LINES_LUMA) >> 3) +
++		  ALIGN(frame_width, AV1D_LCU_MAX_SIZE_PELS) / 2 *
++		((BITS_PER_PIX * NUM_LINES_CHROMA) >> 3) * 2);
++}
++
++static inline u32 size_av1d_lb_fe_left_data(u32 frame_width, u32 frame_height)
++{
++	return (32 * (ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) +
++			  ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) /
++			  AV1D_LCU_MIN_SIZE_PELS * 16) +
++		16 * (ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) / 2 +
++			  ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) /
++			  AV1D_LCU_MIN_SIZE_PELS * 8) * 2 +
++		24 * (ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) +
++			  ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) /
++			  AV1D_LCU_MIN_SIZE_PELS * 16) +
++		24 * (ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) / 2 +
++			  ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) /
++			  AV1D_LCU_MIN_SIZE_PELS * 12) * 2 +
++		24 * (ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) +
++			  ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) /
++			  AV1D_LCU_MIN_SIZE_PELS * 16) +
++		16 * (ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) +
++			  ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) /
++			  AV1D_LCU_MIN_SIZE_PELS * 16) +
++		16 * (ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) / 2 +
++			  ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) /
++			  AV1D_LCU_MIN_SIZE_PELS * 12) * 2);
++}
++
++static inline u32 size_av1d_lb_fe_top_ctrl(u32 frame_width, u32 frame_height)
++{
++	return (NUM_CTRL_PACK_LCU * ((frame_width + AV1D_LCU_MIN_SIZE_PELS - 1) /
++		AV1D_LCU_MIN_SIZE_PELS) * BITS_PER_CTRL_PACK / 8);
++}
++
++static inline u32 size_av1d_lb_fe_left_ctrl(u32 frame_width, u32 frame_height)
++{
++	return (16 * ((ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) / 16) +
++		(ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) /
++		 AV1D_LCU_MIN_SIZE_PELS)) +
++		 3 * 16 * (ALIGN(frame_height, AV1D_LCU_MAX_SIZE_PELS) /
++		 AV1D_LCU_MIN_SIZE_PELS));
++}
++
++static inline u32 size_av1d_lb_se_top_ctrl(u32 frame_width, u32 frame_height)
++{
++	return (((frame_width + 7) / 8) * MAX_SE_NBR_CTRL_LCU16_LINE_BUFFER_SIZE);
++}
++
++static inline u32 size_av1d_lb_se_left_ctrl(u32 frame_width, u32 frame_height)
++{
++	return (max(((frame_height + 15) / 16) *
++		MAX_SE_NBR_CTRL_LCU16_LINE_BUFFER_SIZE,
++		max(((frame_height + 31) / 32) *
++		MAX_SE_NBR_CTRL_LCU32_LINE_BUFFER_SIZE,
++		((frame_height + 63) / 64) *
++		MAX_SE_NBR_CTRL_LCU64_LINE_BUFFER_SIZE)));
++}
++
++static inline u32 size_av1d_lb_pe_top_data(u32 frame_width, u32 frame_height)
++{
++	return (max(((frame_width + 15) / 16) *
++		MAX_PE_NBR_DATA_LCU16_LINE_BUFFER_SIZE,
++		max(((frame_width + 31) / 32) *
++		MAX_PE_NBR_DATA_LCU32_LINE_BUFFER_SIZE,
++		((frame_width + 63) / 64) *
++		MAX_PE_NBR_DATA_LCU64_LINE_BUFFER_SIZE)));
++}
++
++static inline u32 size_av1d_lb_vsp_top(u32 frame_width, u32 frame_height)
++{
++	return (max(((frame_width + 63) / 64) * 1280,
++		    ((frame_width + 127) / 128) * 2304));
++}
++
++static inline u32 size_av1d_lb_recon_dma_metadata_wr(u32 frame_width,
++						     u32 frame_height)
++{
++	return ((ALIGN(frame_height, 8) / (4 / 2)) * 64);
++}
++
++static inline u32 size_av1d_qp(u32 frame_width, u32 frame_height)
++{
++	return size_h264d_qp(frame_width, frame_height);
++}
++
++
++#define HFI_COLOR_FORMAT_YUV420_NV12_UBWC_Y_TILE_HEIGHT (8)
++#define HFI_COLOR_FORMAT_YUV420_NV12_UBWC_Y_TILE_WIDTH (32)
++#define HFI_COLOR_FORMAT_YUV420_NV12_UBWC_UV_TILE_HEIGHT (8)
++#define HFI_COLOR_FORMAT_YUV420_NV12_UBWC_UV_TILE_WIDTH (16)
++#define HFI_COLOR_FORMAT_YUV420_TP10_UBWC_Y_TILE_HEIGHT (4)
++#define HFI_COLOR_FORMAT_YUV420_TP10_UBWC_Y_TILE_WIDTH (48)
++#define HFI_COLOR_FORMAT_YUV420_TP10_UBWC_UV_TILE_HEIGHT (4)
++#define HFI_COLOR_FORMAT_YUV420_TP10_UBWC_UV_TILE_WIDTH (24)
++#define AV1D_SIZE_BSE_COL_MV_64x64 512
++#define AV1D_SIZE_BSE_COL_MV_128x128 2816
++#define UBWC_TILE_SIZE 256
++
++static u32 size_av1d_hw_bin_buffer(u32 frame_width, u32 frame_height, u32 num_vpp_pipes)
++{
++	u32 size_yuv, size_bin_hdr, size_bin_res;
++
++	size_yuv = ((frame_width * frame_height) <= BIN_BUFFER_THRESHOLD) ?
++		((BIN_BUFFER_THRESHOLD * 3) >> 1) :
++		((frame_width * frame_height * 3) >> 1);
++	size_bin_hdr = size_yuv * AV1_CABAC_HDR_RATIO_HD_TOT;
++	size_bin_res = size_yuv * AV1_CABAC_RES_RATIO_HD_TOT;
++	size_bin_hdr = ALIGN(size_bin_hdr / num_vpp_pipes,
++			     DMA_ALIGNMENT) * num_vpp_pipes;
++	size_bin_res = ALIGN(size_bin_res / num_vpp_pipes,
++			     DMA_ALIGNMENT) * num_vpp_pipes;
++
++	return size_bin_hdr + size_bin_res;
++}
++
++static u32 hfi_buffer_bin_av1d(u32 frame_width, u32 frame_height, u32 num_vpp_pipes)
++{
++	u32 n_aligned_h = ALIGN(frame_height, 16);
++	u32 n_aligned_w = ALIGN(frame_width, 16);
++
++	return size_av1d_hw_bin_buffer(n_aligned_w, n_aligned_h, num_vpp_pipes);
++}
++
++static u32 num_lcu(u32 frame_width, u32 frame_height, u32 lcu_size)
++{
++	return ((frame_width + lcu_size - 1) / lcu_size) *
++		((frame_height + lcu_size - 1) / lcu_size);
++}
++
++static u32 hfi_buffer_comv_av1d(u32 frame_width, u32 frame_height, u32 comv_bufcount)
++{
++	u32 size;
++
++	size =  2 * ALIGN(max(num_lcu(frame_width, frame_height, 64) *
++			  AV1D_SIZE_BSE_COL_MV_64x64,
++			  num_lcu(frame_width, frame_height, 128) *
++			  AV1D_SIZE_BSE_COL_MV_128x128),
++			  DMA_ALIGNMENT);
++	size *= comv_bufcount;
++
++	return size;
++}
++
++static u32 hfi_buffer_persist_av1d(u32 max_width, u32 max_height, u32 total_ref_count)
++{
++	u32 comv_size, size;
++
++	comv_size =  hfi_buffer_comv_av1d(max_width, max_height, total_ref_count);
++	size = ALIGN((SIZE_AV1D_SEQUENCE_HEADER * 2 + SIZE_AV1D_METADATA +
++	AV1D_NUM_HW_PIC_BUF * (SIZE_AV1D_TILE_OFFSET + SIZE_AV1D_QM) +
++	AV1D_NUM_FRAME_HEADERS * (SIZE_AV1D_FRAME_HEADER +
++	2 * SIZE_AV1D_PROB_TABLE) + comv_size + HDR10_HIST_EXTRADATA_SIZE +
++	SIZE_AV1D_METADATA * AV1D_NUM_HW_PIC_BUF), DMA_ALIGNMENT);
++
++	return ALIGN(size, DMA_ALIGNMENT);
++}
++
++static u32 size_av1d_lb_opb_wr1_nv12_ubwc(u32 frame_width, u32 frame_height)
++{
++	u32 size, y_width, y_width_a = 128;
++
++	y_width = ALIGN(frame_width, y_width_a);
++
++	size = ((y_width + HFI_COLOR_FORMAT_YUV420_NV12_UBWC_Y_TILE_WIDTH - 1) /
++		 HFI_COLOR_FORMAT_YUV420_NV12_UBWC_Y_TILE_WIDTH  +
++		 (AV1D_MAX_TILE_COLS - 1));
++	return size * UBWC_TILE_SIZE;
++}
++
++static u32 size_av1d_lb_opb_wr1_tp10_ubwc(u32 frame_width, u32 frame_height)
++{
++	u32 size, y_width, y_width_a = 256;
++
++	y_width = ALIGN(frame_width, y_width_a);
++
++	size = ((y_width + HFI_COLOR_FORMAT_YUV420_TP10_UBWC_Y_TILE_WIDTH - 1) /
++		 HFI_COLOR_FORMAT_YUV420_TP10_UBWC_Y_TILE_WIDTH +
++		 (AV1D_MAX_TILE_COLS - 1));
++
++	return size * UBWC_TILE_SIZE;
++}
++
++static u32 hfi_buffer_line_av1d(u32 frame_width, u32 frame_height,
++				bool is_opb, u32 num_vpp_pipes)
++{
++	u32 size, vpss_lb_size, opbwrbufsize, opbwr8, opbwr10;
++
++	size = ALIGN(size_av1d_lb_fe_top_data(frame_width, frame_height),
++		     DMA_ALIGNMENT) +
++		ALIGN(size_av1d_lb_fe_top_ctrl(frame_width, frame_height),
++		      DMA_ALIGNMENT) +
++		ALIGN(size_av1d_lb_fe_left_data(frame_width, frame_height),
++		      DMA_ALIGNMENT) * num_vpp_pipes +
++		ALIGN(size_av1d_lb_fe_left_ctrl(frame_width, frame_height),
++		      DMA_ALIGNMENT) * num_vpp_pipes +
++		ALIGN(size_av1d_lb_se_left_ctrl(frame_width, frame_height),
++		      DMA_ALIGNMENT) * num_vpp_pipes +
++		ALIGN(size_av1d_lb_se_top_ctrl(frame_width, frame_height),
++		      DMA_ALIGNMENT) +
++		ALIGN(size_av1d_lb_pe_top_data(frame_width, frame_height),
++		      DMA_ALIGNMENT) +
++		ALIGN(size_av1d_lb_vsp_top(frame_width, frame_height),
++		      DMA_ALIGNMENT) +
++		ALIGN(size_av1d_lb_recon_dma_metadata_wr
++		      (frame_width, frame_height), DMA_ALIGNMENT) * 2 +
++		ALIGN(size_av1d_qp(frame_width, frame_height), DMA_ALIGNMENT);
++	opbwr8 = size_av1d_lb_opb_wr1_nv12_ubwc(frame_width, frame_height);
++	opbwr10 = size_av1d_lb_opb_wr1_tp10_ubwc(frame_width, frame_height);
++	opbwrbufsize = opbwr8 >= opbwr10 ? opbwr8 : opbwr10;
++	size = ALIGN((size + opbwrbufsize), DMA_ALIGNMENT);
++	if (is_opb) {
++		vpss_lb_size = size_vpss_lb(frame_width, frame_height, num_vpp_pipes);
++		size = ALIGN((size + vpss_lb_size) * 2, DMA_ALIGNMENT);
++	}
++
++	return size;
++}
++
++static u32 size_av1d_ibc_nv12_ubwc(u32 frame_width, u32 frame_height)
++{
++	u32 size;
++	u32 y_width_a = 128, y_height_a = 32;
++	u32 uv_width_a = 128, uv_height_a = 32;
++	u32 ybufsize, uvbufsize, y_width, y_height, uv_width, uv_height;
++	u32 y_meta_width_a = 64, y_meta_height_a = 16;
++	u32 uv_meta_width_a = 64, uv_meta_height_a = 16;
++	u32 meta_height, meta_stride, meta_size;
++	u32 tile_width_y = HFI_COLOR_FORMAT_YUV420_NV12_UBWC_Y_TILE_WIDTH;
++	u32 tile_height_y = HFI_COLOR_FORMAT_YUV420_NV12_UBWC_Y_TILE_HEIGHT;
++	u32 tile_width_uv = HFI_COLOR_FORMAT_YUV420_NV12_UBWC_UV_TILE_WIDTH;
++	u32 tile_height_uv = HFI_COLOR_FORMAT_YUV420_NV12_UBWC_UV_TILE_HEIGHT;
++
++	y_width = ALIGN(frame_width, y_width_a);
++	y_height = ALIGN(frame_height, y_height_a);
++	uv_width = ALIGN(frame_width, uv_width_a);
++	uv_height = ALIGN(((frame_height + 1) >> 1), uv_height_a);
++	ybufsize = ALIGN((y_width * y_height), HFI_ALIGNMENT_4096);
++	uvbufsize = ALIGN(uv_width * uv_height, HFI_ALIGNMENT_4096);
++	size = ybufsize + uvbufsize;
++	meta_stride = ALIGN(((frame_width + (tile_width_y - 1)) / tile_width_y),
++			    y_meta_width_a);
++	meta_height = ALIGN(((frame_height + (tile_height_y - 1)) / tile_height_y),
++			    y_meta_height_a);
++	meta_size = ALIGN(meta_stride * meta_height, HFI_ALIGNMENT_4096);
++	size += meta_size;
++	meta_stride = ALIGN(((((frame_width + 1) >> 1) + (tile_width_uv - 1)) /
++				tile_width_uv),	uv_meta_width_a);
++	meta_height = ALIGN(((((frame_height + 1) >> 1) + (tile_height_uv - 1)) /
++				tile_height_uv), uv_meta_height_a);
++	meta_size = ALIGN(meta_stride * meta_height, HFI_ALIGNMENT_4096);
++	size += meta_size;
++
++	return size;
++}
++
++static u32 hfi_yuv420_tp10_calc_y_stride(u32 frame_width, u32 stride_multiple)
++{
++	u32 stride;
++
++	stride = ALIGN(frame_width, 192);
++	stride = ALIGN(stride * 4 / 3, stride_multiple);
++
++	return stride;
++}
++
++static u32 hfi_yuv420_tp10_calc_y_bufheight(u32 frame_height, u32 min_buf_height_multiple)
++{
++	return ALIGN(frame_height, min_buf_height_multiple);
++}
++
++static u32 hfi_yuv420_tp10_calc_uv_stride(u32 frame_width, u32 stride_multiple)
++{
++	u32 stride;
++
++	stride = ALIGN(frame_width, 192);
++	stride = ALIGN(stride * 4 / 3, stride_multiple);
++
++	return stride;
++}
++
++static u32 hfi_yuv420_tp10_calc_uv_bufheight(u32 frame_height, u32 min_buf_height_multiple)
++{
++	return ALIGN(((frame_height + 1) >> 1),	min_buf_height_multiple);
++}
++
++static u32 size_av1d_ibc_tp10_ubwc(u32 frame_width, u32 frame_height)
++{
++	u32 size;
++	u32 y_width_a = 256, y_height_a = 16,
++		uv_width_a = 256, uv_height_a = 16;
++	u32 ybufsize, uvbufsize, y_width, y_height, uv_width, uv_height;
++	u32 y_meta_width_a = 64, y_meta_height_a = 16,
++		uv_meta_width_a = 64, uv_meta_height_a = 16;
++	u32 meta_height, meta_stride, meta_size;
++	u32 tile_width_y = HFI_COLOR_FORMAT_YUV420_TP10_UBWC_Y_TILE_WIDTH;
++	u32 tile_height_y = HFI_COLOR_FORMAT_YUV420_TP10_UBWC_Y_TILE_HEIGHT;
++	u32 tile_width_uv = HFI_COLOR_FORMAT_YUV420_TP10_UBWC_UV_TILE_WIDTH;
++	u32 tile_height_uv = HFI_COLOR_FORMAT_YUV420_TP10_UBWC_UV_TILE_HEIGHT;
++
++	y_width = hfi_yuv420_tp10_calc_y_stride(frame_width, y_width_a);
++	y_height = hfi_yuv420_tp10_calc_y_bufheight(frame_height, y_height_a);
++	uv_width = hfi_yuv420_tp10_calc_uv_stride(frame_width, uv_width_a);
++	uv_height = hfi_yuv420_tp10_calc_uv_bufheight(frame_height, uv_height_a);
++	ybufsize = ALIGN(y_width * y_height, HFI_ALIGNMENT_4096);
++	uvbufsize = ALIGN(uv_width * uv_height, HFI_ALIGNMENT_4096);
++	size = ybufsize + uvbufsize;
++	meta_stride = ALIGN(((frame_width + (tile_width_y - 1)) / tile_width_y),
++			    y_meta_width_a);
++	meta_height = ALIGN(((frame_height + (tile_height_y - 1)) / tile_height_y),
++			    y_meta_height_a);
++	meta_size = ALIGN(meta_stride * meta_height, HFI_ALIGNMENT_4096);
++	size += meta_size;
++	meta_stride = ALIGN(((((frame_width + 1) >> 1) + (tile_width_uv - 1)) /
++				tile_width_uv), uv_meta_width_a);
++	meta_height = ALIGN(((((frame_height + 1) >> 1) + (tile_height_uv - 1)) /
++				tile_height_uv), uv_meta_height_a);
++	meta_size = ALIGN(meta_stride * meta_height, HFI_ALIGNMENT_4096);
++	size += meta_size;
++
++	return size;
++}
++
++static u32 hfi_buffer_ibc_av1d(u32 frame_width, u32 frame_height)
++{
++	u32 size, ibc8, ibc10;
++
++	ibc8 = size_av1d_ibc_nv12_ubwc(frame_width, frame_height);
++	ibc10 = size_av1d_ibc_tp10_ubwc(frame_width, frame_height);
++	size = ibc8 >= ibc10 ? ibc8 : ibc10;
++
++	return ALIGN(size, DMA_ALIGNMENT);
++}
++
++#endif
+diff --git a/drivers/media/platform/qcom/vcodec/iris/iris_buffer.c b/drivers/media/platform/qcom/vcodec/iris/iris_buffer.c
+index d86c2bd82..4bc5ea991 100644
+--- a/drivers/media/platform/qcom/vcodec/iris/iris_buffer.c
++++ b/drivers/media/platform/qcom/vcodec/iris/iris_buffer.c
+@@ -17,6 +17,7 @@ static const u32 dec_ip_int_buf_type[] = {
+ 	BUF_COMV,
+ 	BUF_NON_COMV,
+ 	BUF_LINE,
++	BUF_PARTIAL,
+ };
+ 
+ static const u32 dec_op_int_buf_type[] = {
+@@ -70,7 +71,8 @@ static int output_min_count(struct iris_inst *inst)
+ 
+ 	/* fw_min_count > 0 indicates reconfig event has already arrived */
+ 	if (inst->fw_min_count) {
+-		if (is_split_mode_enabled(inst) && inst->codec == VP9)
++		if (is_split_mode_enabled(inst) &&
++		    (inst->codec == VP9 || inst->codec == AV1))
+ 			return min_t(u32, 4, inst->fw_min_count);
+ 		else
+ 			return inst->fw_min_count;
+@@ -81,6 +83,9 @@ static int output_min_count(struct iris_inst *inst)
+ 	case HEVC:
+ 		output_min_count = 4;
+ 		break;
++	case AV1:
++		output_min_count = 11;
++		break;
+ 	case VP9:
+ 		output_min_count = 9;
+ 		break;
+@@ -123,6 +128,13 @@ static u32 internal_buffer_count(struct iris_inst *inst,
+ 	if (inst->domain == ENCODER)
+ 		return 1;
+ 
++	if (inst->domain == DECODER && inst->codec == AV1) {
++		if (buffer_type == BUF_NON_COMV)
++			return 0;
++		if (buffer_type == BUF_COMV || buffer_type == BUF_PARTIAL)
++			return 1;
++	}
++
+ 	if (inst->domain == DECODER) {
+ 		if (buffer_type == BUF_BIN || buffer_type == BUF_LINE ||
+ 		    buffer_type == BUF_PERSIST) {
+@@ -168,6 +180,7 @@ int iris_get_buf_min_count(struct iris_inst *inst,
+ 	case BUF_NON_COMV:
+ 	case BUF_LINE:
+ 	case BUF_PERSIST:
++	case BUF_PARTIAL:
+ 	case BUF_ARP:
+ 		return internal_buffer_count(inst, buffer_type);
+ 	case BUF_DPB:
+@@ -194,7 +207,7 @@ static u32 dec_input_buffer_size(struct iris_inst *inst)
+ 		base_res_mbs = inst->cap[MBPF].value;
+ 	} else {
+ 		base_res_mbs = NUM_MBS_4k;
+-		if (codec == V4L2_PIX_FMT_VP9)
++		if (codec == V4L2_PIX_FMT_VP9 || codec == V4L2_PIX_FMT_AV1)
+ 			div_factor = 1;
+ 		else
+ 			div_factor = 2;
+@@ -203,7 +216,8 @@ static u32 dec_input_buffer_size(struct iris_inst *inst)
+ 	frame_size = base_res_mbs * MB_IN_PIXEL * 3 / 2 / div_factor;
+ 
+ 	 /* multiply by 10/8 (1.25) to get size for 10 bit case */
+-	if (codec == V4L2_PIX_FMT_VP9 || codec == V4L2_PIX_FMT_HEVC)
++	if (codec == V4L2_PIX_FMT_VP9 || codec == V4L2_PIX_FMT_HEVC ||
++	    codec == V4L2_PIX_FMT_AV1)
+ 		frame_size = frame_size + (frame_size >> 2);
+ 
+ 	return ALIGN(frame_size, SZ_4K);
+@@ -338,6 +352,8 @@ struct iris_buffers *iris_get_buffer_list(struct iris_inst *inst,
+ 		return &inst->buffers.dpb;
+ 	case BUF_PERSIST:
+ 		return &inst->buffers.persist;
++	case BUF_PARTIAL:
++		return &inst->buffers.partial;
+ 	case BUF_VPSS:
+ 		return &inst->buffers.vpss;
+ 	default:
+diff --git a/drivers/media/platform/qcom/vcodec/iris/iris_buffer.h b/drivers/media/platform/qcom/vcodec/iris/iris_buffer.h
+index 6ab5f22ae..343233277 100644
+--- a/drivers/media/platform/qcom/vcodec/iris/iris_buffer.h
++++ b/drivers/media/platform/qcom/vcodec/iris/iris_buffer.h
+@@ -32,6 +32,7 @@ struct iris_buffers_info {
+ 	struct iris_buffers	dpb;
+ 	struct iris_buffers	persist;
+ 	struct iris_buffers	vpss;
++	struct iris_buffers	partial;
+ };
+ 
+ int update_buffer_count(struct iris_inst *inst, u32 plane);
+diff --git a/drivers/media/platform/qcom/vcodec/iris/iris_common.h b/drivers/media/platform/qcom/vcodec/iris/iris_common.h
+index d9413751b..415129b64 100644
+--- a/drivers/media/platform/qcom/vcodec/iris/iris_common.h
++++ b/drivers/media/platform/qcom/vcodec/iris/iris_common.h
+@@ -10,6 +10,11 @@
+ #include <media/v4l2-event.h>
+ #include <media/videobuf2-v4l2.h>
+ 
++/* Stateful AV1 FourCC added to V4L2 after this kernel version. */
++#ifndef V4L2_PIX_FMT_AV1
++#define V4L2_PIX_FMT_AV1 v4l2_fourcc('A', 'V', '0', '1')
++#endif
++
+ #define INPUT_MPLANE V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE
+ #define OUTPUT_MPLANE V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE
+ #define DEFAULT_WIDTH 320
+@@ -43,6 +48,7 @@ enum codec_type {
+ 	H264	= BIT(0),
+ 	HEVC	= BIT(1),
+ 	VP9	= BIT(2),
++	AV1	= BIT(3),
+ };
+ 
+ enum colorformat_type {
+@@ -82,6 +88,7 @@ enum iris_buffer_type {
+ 	BUF_DPB,
+ 	BUF_PERSIST,
+ 	BUF_VPSS,
++	BUF_PARTIAL,
+ };
+ 
+ enum iris_buffer_flags {
+@@ -127,6 +134,8 @@ struct subscription_params {
+ 	u32	profile;
+ 	u32	level;
+ 	u32	tier;
++	u32	film_grain;
++	u32	super_block;
+ };
+ 
+ struct iris_hfi_frame_info {
+diff --git a/drivers/media/platform/qcom/vcodec/iris/iris_helpers.c b/drivers/media/platform/qcom/vcodec/iris/iris_helpers.c
+index 649d6cb68..a36cf54bb 100644
+--- a/drivers/media/platform/qcom/vcodec/iris/iris_helpers.c
++++ b/drivers/media/platform/qcom/vcodec/iris/iris_helpers.c
+@@ -718,6 +718,7 @@ void iris_destroy_buffers(struct iris_inst *inst)
+ 		BUF_LINE,
+ 		BUF_DPB,
+ 		BUF_PERSIST,
++		BUF_PARTIAL,
+ 	};
+ 	int i;
+ 
+diff --git a/drivers/media/platform/qcom/vcodec/iris/iris_hfi_packet.c b/drivers/media/platform/qcom/vcodec/iris/iris_hfi_packet.c
+index 5675ecd85..55a6a5421 100644
+--- a/drivers/media/platform/qcom/vcodec/iris/iris_hfi_packet.c
++++ b/drivers/media/platform/qcom/vcodec/iris/iris_hfi_packet.c
+@@ -20,6 +20,7 @@ u32 get_hfi_port_from_buffer_type(struct iris_inst *inst, enum iris_buffer_type
+ 		case BUF_COMV:
+ 		case BUF_NON_COMV:
+ 		case BUF_LINE:
++		case BUF_PARTIAL:
+ 			hfi_port = HFI_PORT_BITSTREAM;
+ 			break;
+ 		case BUF_OUTPUT:
+@@ -109,6 +110,8 @@ static u32 hfi_buf_type_from_driver(enum domain_type domain, enum iris_buffer_ty
+ 		return HFI_BUFFER_COMV;
+ 	case BUF_NON_COMV:
+ 		return HFI_BUFFER_NON_COMV;
++	case BUF_PARTIAL:
++		return HFI_BUFFER_PARTIAL_DATA;
+ 	case BUF_LINE:
+ 		return HFI_BUFFER_LINE;
+ 	case BUF_DPB:
+@@ -141,6 +144,8 @@ u32 hfi_buf_type_to_driver(enum domain_type domain, enum hfi_buffer_type buf_typ
+ 		return BUF_COMV;
+ 	case HFI_BUFFER_NON_COMV:
+ 		return BUF_NON_COMV;
++	case HFI_BUFFER_PARTIAL_DATA:
++		return BUF_PARTIAL;
+ 	case HFI_BUFFER_LINE:
+ 		return BUF_LINE;
+ 	case HFI_BUFFER_DPB:
+@@ -169,6 +174,8 @@ u32 get_hfi_codec(struct iris_inst *inst)
+ 			return HFI_CODEC_DECODE_HEVC;
+ 	case VP9:
+ 		return HFI_CODEC_DECODE_VP9;
++	case AV1:
++		return HFI_CODEC_DECODE_AV1;
+ 	default:
+ 		return 0;
+ 	}
+diff --git a/drivers/media/platform/qcom/vcodec/iris/iris_hfi_response.c b/drivers/media/platform/qcom/vcodec/iris/iris_hfi_response.c
+index f8b644efd..e65121cc5 100644
+--- a/drivers/media/platform/qcom/vcodec/iris/iris_hfi_response.c
++++ b/drivers/media/platform/qcom/vcodec/iris/iris_hfi_response.c
+@@ -63,6 +63,7 @@ static bool is_valid_hfi_buffer_type(u32 buffer_type)
+ 	    buffer_type != HFI_BUFFER_LINE &&
+ 	    buffer_type != HFI_BUFFER_DPB &&
+ 	    buffer_type != HFI_BUFFER_PERSIST &&
++	    buffer_type != HFI_BUFFER_PARTIAL_DATA &&
+ 	    buffer_type != HFI_BUFFER_VPSS) {
+ 		return false;
+ 	}
+@@ -630,6 +631,7 @@ static int handle_session_buffer(struct iris_inst *inst,
+ 		{HFI_BUFFER_COMV,           handle_release_internal_buffer    },
+ 		{HFI_BUFFER_NON_COMV,       handle_release_internal_buffer    },
+ 		{HFI_BUFFER_LINE,           handle_release_internal_buffer    },
++		{HFI_BUFFER_PARTIAL_DATA,   handle_release_internal_buffer    },
+ 		{HFI_BUFFER_PERSIST,        handle_release_internal_buffer    },
+ 	};
+ 	static const struct iris_hfi_buffer_handle dec_output_hfi_handle[] = {
+@@ -646,6 +648,7 @@ static int handle_session_buffer(struct iris_inst *inst,
+ 		{HFI_BUFFER_COMV,           handle_release_internal_buffer    },
+ 		{HFI_BUFFER_NON_COMV,       handle_release_internal_buffer    },
+ 		{HFI_BUFFER_LINE,           handle_release_internal_buffer    },
++		{HFI_BUFFER_PARTIAL_DATA,   handle_release_internal_buffer    },
+ 		{HFI_BUFFER_ARP,            handle_release_internal_buffer    },
+ 		{HFI_BUFFER_DPB,            handle_release_internal_buffer    },
+ 	};
+@@ -832,6 +835,12 @@ static int handle_session_property(struct iris_inst *inst,
+ 	case HFI_PROP_LEVEL:
+ 		inst->src_subcr_params.level = payload_ptr[0];
+ 		break;
++	case HFI_PROP_AV1_FILM_GRAIN_PRESENT:
++		inst->src_subcr_params.film_grain = payload_ptr[0];
++		break;
++	case HFI_PROP_AV1_SUPER_BLOCK_ENABLED:
++		inst->src_subcr_params.super_block = payload_ptr[0];
++		break;
+ 	case HFI_PROP_TIER:
+ 		inst->src_subcr_params.tier = payload_ptr[0];
+ 		break;
+diff --git a/drivers/media/platform/qcom/vcodec/iris/iris_probe.c b/drivers/media/platform/qcom/vcodec/iris/iris_probe.c
+index ed8a24e0a..ab9f412a9 100644
+--- a/drivers/media/platform/qcom/vcodec/iris/iris_probe.c
++++ b/drivers/media/platform/qcom/vcodec/iris/iris_probe.c
+@@ -20,14 +20,15 @@ static int init_iris_isr(struct iris_core *core)
+ {
+ 	int ret;
+ 
++	/* Keep pending interrupts masked until power_on_iris3 initializes the core. */
+ 	ret = devm_request_threaded_irq(core->dev, core->irq, NULL,
+-					iris_hfi_isr_handler, IRQF_ONESHOT| IRQF_TRIGGER_HIGH, "iris", core);
++					iris_hfi_isr_handler,
++					IRQF_ONESHOT | IRQF_TRIGGER_HIGH | IRQF_NO_AUTOEN,
++					"iris", core);
+ 	if (ret) {
+ 		dev_err(core->dev, "%s: Failed to allocate iris IRQ\n", __func__);
+ 		return ret;
+ 	}
+-	disable_irq_nosync(core->irq);
+-
+ 	return ret;
+ }
+ 
+diff --git a/drivers/media/platform/qcom/vcodec/iris/iris_vdec.c b/drivers/media/platform/qcom/vcodec/iris/iris_vdec.c
+index 633d0aba6..fe4d80d53 100644
+--- a/drivers/media/platform/qcom/vcodec/iris/iris_vdec.c
++++ b/drivers/media/platform/qcom/vcodec/iris/iris_vdec.c
+@@ -336,6 +336,9 @@ static int vdec_subscribe_property(struct iris_inst *inst, u32 plane)
+ 		} else if (inst->codec == VP9) {
+ 			subscribe_prop_size = core->platform_data->dec_output_prop_size_vp9;
+ 			subcribe_prop = core->platform_data->dec_output_prop_vp9;
++		} else if (inst->codec == AV1) {
++			subscribe_prop_size = core->platform_data->dec_output_prop_size_av1;
++			subcribe_prop = core->platform_data->dec_output_prop_av1;
+ 		} else {
+ 			return -EINVAL;
+ 		}
+@@ -556,7 +559,7 @@ static int vdec_set_tier(struct iris_inst *inst)
+ {
+ 	u32 tier;
+ 
+-	tier = inst->cap[HEVC_TIER].value;
++	tier = inst->cap[inst->codec == AV1 ? AV1_TIER : HEVC_TIER].value;
+ 	inst->src_subcr_params.tier = tier;
+ 
+ 	return iris_hfi_set_property(inst,
+@@ -568,6 +571,26 @@ static int vdec_set_tier(struct iris_inst *inst)
+ 				     sizeof(u32));
+ }
+ 
++static int vdec_set_film_grain(struct iris_inst *inst)
++{
++	u32 value = inst->cap[AV1_FILM_GRAIN].value;
++
++	inst->src_subcr_params.film_grain = value;
++	return iris_hfi_set_property(inst, HFI_PROP_AV1_FILM_GRAIN_PRESENT,
++			HFI_HOST_FLAGS_NONE, get_hfi_port(inst, INPUT_MPLANE),
++			HFI_PAYLOAD_U32_ENUM, &value, sizeof(value));
++}
++
++static int vdec_set_super_block(struct iris_inst *inst)
++{
++	u32 value = inst->cap[AV1_SUPER_BLOCK].value;
++
++	inst->src_subcr_params.super_block = value;
++	return iris_hfi_set_property(inst, HFI_PROP_AV1_SUPER_BLOCK_ENABLED,
++			HFI_HOST_FLAGS_NONE, get_hfi_port(inst, INPUT_MPLANE),
++			HFI_PAYLOAD_U32_ENUM, &value, sizeof(value));
++}
++
+ static int vdec_subscribe_src_change_param(struct iris_inst *inst)
+ {
+ 	const u32 *src_change_param;
+@@ -588,6 +611,8 @@ static int vdec_subscribe_src_change_param(struct iris_inst *inst)
+ 		{HFI_PROP_PROFILE,                       vdec_set_profile                },
+ 		{HFI_PROP_LEVEL,                         vdec_set_level                  },
+ 		{HFI_PROP_TIER,                          vdec_set_tier                   },
++		{HFI_PROP_AV1_SUPER_BLOCK_ENABLED, vdec_set_super_block},
++		{HFI_PROP_AV1_FILM_GRAIN_PRESENT, vdec_set_film_grain},
+ 	};
+ 
+ 	core = inst->core;
+@@ -602,6 +627,9 @@ static int vdec_subscribe_src_change_param(struct iris_inst *inst)
+ 	} else if (inst->codec == VP9) {
+ 		src_change_param_size = core->platform_data->vp9_subscribe_param_size;
+ 		src_change_param = core->platform_data->vp9_subscribe_param;
++	} else if (inst->codec == AV1) {
++		src_change_param_size = core->platform_data->av1_subscribe_param_size;
++		src_change_param = core->platform_data->av1_subscribe_param;
+ 	} else {
+ 		src_change_param = NULL;
+ 		return -EINVAL;
+@@ -677,9 +705,11 @@ int vdec_init_src_change_param(struct iris_inst *inst)
+ 		((video_format << 26) & 0x1C000000) |
+ 		((video_signal_type_present_flag << 29) & 0x20000000);
+ 
++	subsc_params->film_grain = inst->cap[AV1_FILM_GRAIN].value;
++	subsc_params->super_block = inst->cap[AV1_SUPER_BLOCK].value;
+ 	subsc_params->profile = inst->cap[PROFILE].value;
+ 	subsc_params->level = inst->cap[LEVEL].value;
+-	subsc_params->tier = inst->cap[HEVC_TIER].value;
++	subsc_params->tier = inst->cap[inst->codec == AV1 ? AV1_TIER : HEVC_TIER].value;
+ 	subsc_params->pic_order_cnt = inst->cap[POC].value;
+ 	subsc_params->bit_depth = inst->cap[BIT_DEPTH].value;
+ 	if (inst->cap[CODED_FRAMES].value ==
+@@ -775,7 +805,11 @@ static int vdec_read_input_subcr_params(struct iris_inst *inst)
+ 
+ 	inst->cap[PROFILE].value = subsc_params.profile;
+ 	inst->cap[LEVEL].value = subsc_params.level;
+-	inst->cap[HEVC_TIER].value = subsc_params.tier;
++	inst->cap[inst->codec == AV1 ? AV1_TIER : HEVC_TIER].value = subsc_params.tier;
++	if (inst->codec == AV1) {
++		inst->cap[AV1_FILM_GRAIN].value = subsc_params.film_grain;
++		inst->cap[AV1_SUPER_BLOCK].value = subsc_params.super_block;
++	}
+ 	inst->cap[POC].value = subsc_params.pic_order_cnt;
+ 
+ 	if (subsc_params.bit_depth == BIT_DEPTH_8)
+@@ -944,6 +978,9 @@ static int vdec_subscribe_dst_change_param(struct iris_inst *inst)
+ 	} else if (inst->codec == VP9) {
+ 		dst_change_param_size = core->platform_data->vp9_subscribe_param_size;
+ 		dst_change_param = core->platform_data->vp9_subscribe_param;
++	} else if (inst->codec == AV1) {
++		dst_change_param_size = core->platform_data->av1_subscribe_param_size;
++		dst_change_param = core->platform_data->av1_subscribe_param;
+ 	} else {
+ 		dst_change_param = NULL;
+ 		return -EINVAL;
+@@ -1019,6 +1056,16 @@ static int vdec_subscribe_dst_change_param(struct iris_inst *inst)
+ 			payload_size = sizeof(u32);
+ 			payload_type = HFI_PAYLOAD_U32;
+ 			break;
++		case HFI_PROP_AV1_FILM_GRAIN_PRESENT:
++			payload[0] = subsc_params.film_grain;
++			payload_size = sizeof(u32);
++			payload_type = HFI_PAYLOAD_U32;
++			break;
++		case HFI_PROP_AV1_SUPER_BLOCK_ENABLED:
++			payload[0] = subsc_params.super_block;
++			payload_size = sizeof(u32);
++			payload_type = HFI_PAYLOAD_U32;
++			break;
+ 		case HFI_PROP_TIER:
+ 			payload[0] = subsc_params.tier;
+ 			payload_size = sizeof(u32);
+diff --git a/drivers/media/platform/qcom/vcodec/iris/iris_vidc.c b/drivers/media/platform/qcom/vcodec/iris/iris_vidc.c
+index e8f8a974a..645033b0f 100644
+--- a/drivers/media/platform/qcom/vcodec/iris/iris_vidc.c
++++ b/drivers/media/platform/qcom/vcodec/iris/iris_vidc.c
+@@ -232,6 +232,7 @@ int vidc_open(struct file *filp)
+ 	INIT_LIST_HEAD(&inst->buffers.dpb.list);
+ 	INIT_LIST_HEAD(&inst->buffers.persist.list);
+ 	INIT_LIST_HEAD(&inst->buffers.vpss.list);
++	INIT_LIST_HEAD(&inst->buffers.partial.list);
+ 	INIT_LIST_HEAD(&inst->caps_list);
+ 	INIT_LIST_HEAD(&inst->input_timer_list);
+ 	for (i = 0; i < MAX_SIGNAL; i++)
+diff --git a/drivers/media/platform/qcom/vcodec/iris/platform_common.h b/drivers/media/platform/qcom/vcodec/iris/platform_common.h
+index e9b5c99d5..b288bf6e2 100644
+--- a/drivers/media/platform/qcom/vcodec/iris/platform_common.h
++++ b/drivers/media/platform/qcom/vcodec/iris/platform_common.h
+@@ -168,6 +168,10 @@ enum plat_inst_cap_type {
+ 	PROFILE,
+ 	LEVEL,
+ 	HEVC_TIER,
++	AV1_TIER,
++	AV1_DRAP,
++	AV1_FILM_GRAIN,
++	AV1_SUPER_BLOCK,
+ 	DISPLAY_DELAY_ENABLE,
+ 	DISPLAY_DELAY,
+ 	OUTPUT_ORDER,
+@@ -306,6 +310,8 @@ struct platform_data {
+ 	unsigned int avc_subscribe_param_size;
+ 	const u32 *hevc_subscribe_param;
+ 	unsigned int hevc_subscribe_param_size;
++	const u32 *av1_subscribe_param;
++	unsigned int av1_subscribe_param_size;
+ 	const u32 *vp9_subscribe_param;
+ 	unsigned int vp9_subscribe_param_size;
+ 	const u32 *dec_input_prop;
+@@ -314,6 +320,8 @@ struct platform_data {
+ 	unsigned int dec_output_prop_size_avc;
+ 	const u32 *dec_output_prop_hevc;
+ 	unsigned int dec_output_prop_size_hevc;
++	const u32 *dec_output_prop_av1;
++	unsigned int dec_output_prop_size_av1;
+ 	const u32 *dec_output_prop_vp9;
+ 	unsigned int dec_output_prop_size_vp9;
+ };
+diff --git a/drivers/media/platform/qcom/vcodec/iris/platform_sm8550.c b/drivers/media/platform/qcom/vcodec/iris/platform_sm8550.c
+index b1d56ac2e..68cc92fd9 100644
+--- a/drivers/media/platform/qcom/vcodec/iris/platform_sm8550.c
++++ b/drivers/media/platform/qcom/vcodec/iris/platform_sm8550.c
+@@ -13,7 +13,7 @@
+ #include "platform_common.h"
+ #include "resources.h"
+ 
+-#define CODECS_ALL	(H264 | HEVC | VP9)
++#define CODECS_ALL	(H264 | HEVC | VP9 | AV1)
+ #define ENC		ENCODER
+ #define DEC		DECODER
+ 
+@@ -40,6 +40,10 @@ static struct codec_info codec_data_sm8550[] = {
+ 		.v4l2_codec  = V4L2_PIX_FMT_VP9,
+ 		.codec  = VP9,
+ 	},
++	{
++		.v4l2_codec = V4L2_PIX_FMT_AV1,
++		.codec = AV1,
++	},
+ };
+ 
+ static struct color_format_info color_format_data_sm8550[] = {
+@@ -70,7 +74,7 @@ static struct color_format_info color_format_data_sm8550[] = {
+ };
+ 
+ static struct plat_core_cap core_data_sm8550[] = {
+-	{DEC_CODECS, H264 | HEVC | VP9},
++	{DEC_CODECS, H264 | HEVC | VP9 | AV1},
+ 	{ENC_CODECS, H264 | HEVC},
+ 	{MAX_SESSION_COUNT, 16},
+ 	{MAX_MBPF, 278528}, /* ((8192x4352)/256) * 2 */
+@@ -87,6 +91,33 @@ static struct plat_core_cap core_data_sm8550[] = {
+ };
+ 
+ static struct plat_inst_cap instance_cap_data_sm8550[] = {
++
++	{PIX_FMTS, DEC, AV1, FMT_NV12, FMT_TP10C, FMT_NV12C},
++	{PROFILE, DEC, AV1,
++		V4L2_MPEG_VIDEO_AV1_PROFILE_MAIN,
++		V4L2_MPEG_VIDEO_AV1_PROFILE_MAIN,
++		BIT(V4L2_MPEG_VIDEO_AV1_PROFILE_MAIN),
++		V4L2_MPEG_VIDEO_AV1_PROFILE_MAIN,
++		V4L2_CID_MPEG_VIDEO_AV1_PROFILE, HFI_PROP_PROFILE,
++		CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU, {0}, NULL, set_u32_enum},
++	{LEVEL, DEC, AV1,
++		V4L2_MPEG_VIDEO_AV1_LEVEL_2_0,
++		V4L2_MPEG_VIDEO_AV1_LEVEL_6_1,
++		GENMASK(V4L2_MPEG_VIDEO_AV1_LEVEL_6_1, V4L2_MPEG_VIDEO_AV1_LEVEL_2_0),
++		V4L2_MPEG_VIDEO_AV1_LEVEL_6_1,
++		V4L2_CID_MPEG_VIDEO_AV1_LEVEL, HFI_PROP_LEVEL,
++		CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU, {0}, NULL, set_u32_enum},
++	{AV1_TIER, DEC, AV1, 0, 1, 1, 0,
++		0, HFI_PROP_TIER, CAP_FLAG_INPUT_PORT, {0}, NULL, set_u32},
++	{AV1_DRAP, DEC, AV1, 0, 1, 1, 0,
++		0, HFI_PROP_AV1_DRAP_CONFIG, CAP_FLAG_INPUT_PORT, {0}, NULL, set_u32},
++	{AV1_FILM_GRAIN, DEC, AV1, 0, 1, 1, 0,
++		0, HFI_PROP_AV1_FILM_GRAIN_PRESENT, CAP_FLAG_VOLATILE},
++	{AV1_SUPER_BLOCK, DEC, AV1, 0, 1, 1, 0,
++		0, HFI_PROP_AV1_SUPER_BLOCK_ENABLED},
++	{ENH_LAYER_COUNT, DEC, AV1, 0, 1, 1, 0,
++		0, HFI_PROP_AV1_OP_POINT, CAP_FLAG_INPUT_PORT, {0}, NULL, set_u32},
++
+ 	{FRAME_WIDTH, DEC, CODECS_ALL, 96, 8192, 1, 1920},
+ 
+ 	{FRAME_WIDTH, DEC, VP9, 96, 4096, 1, 1920},
+@@ -1145,6 +1176,25 @@ static const u32 sm8550_vdec_output_properties_vp9[] = {
+ 	HFI_PROP_DPB_LIST,
+ };
+ 
++static const u32 sm8550_vdec_input_config_param_av1[] = {
++	HFI_PROP_BITSTREAM_RESOLUTION,
++	HFI_PROP_CROP_OFFSETS,
++	HFI_PROP_LUMA_CHROMA_BIT_DEPTH,
++	HFI_PROP_BUFFER_FW_MIN_OUTPUT_COUNT,
++	HFI_PROP_PROFILE,
++	HFI_PROP_LEVEL,
++	HFI_PROP_TIER,
++	HFI_PROP_AV1_FILM_GRAIN_PRESENT,
++	HFI_PROP_AV1_SUPER_BLOCK_ENABLED,
++	HFI_PROP_SIGNAL_COLOR_INFO,
++};
++
++static const u32 sm8550_vdec_subscribe_output_properties_av1[] = {
++	HFI_PROP_PICTURE_TYPE,
++	HFI_PROP_WORST_COMPRESSION_RATIO,
++	HFI_PROP_WORST_COMPLEXITY_FACTOR,
++};
++
+ struct platform_data sm8550_data = {
+ 	.bus_tbl = sm8550_bus_table,
+ 	.bus_tbl_size = ARRAY_SIZE(sm8550_bus_table),
+@@ -1183,6 +1233,10 @@ struct platform_data sm8550_data = {
+ 		sm8550_vdec_src_change_param_hevc,
+ 	.hevc_subscribe_param_size =
+ 		ARRAY_SIZE(sm8550_vdec_src_change_param_hevc),
++	.av1_subscribe_param = sm8550_vdec_input_config_param_av1,
++	.av1_subscribe_param_size = ARRAY_SIZE(sm8550_vdec_input_config_param_av1),
++	.dec_output_prop_av1 = sm8550_vdec_subscribe_output_properties_av1,
++	.dec_output_prop_size_av1 = ARRAY_SIZE(sm8550_vdec_subscribe_output_properties_av1),
+ 	.vp9_subscribe_param =
+ 		sm8550_vdec_src_change_param_vp9,
+ 	.vp9_subscribe_param_size =
+diff --git a/drivers/media/platform/qcom/vcodec/iris/vpu_iris3_buffer.c b/drivers/media/platform/qcom/vcodec/iris/vpu_iris3_buffer.c
+index b829b7c41..102fc5bb2 100644
+--- a/drivers/media/platform/qcom/vcodec/iris/vpu_iris3_buffer.c
++++ b/drivers/media/platform/qcom/vcodec/iris/vpu_iris3_buffer.c
+@@ -7,6 +7,7 @@
+ #include "iris_helpers.h"
+ #include "iris_instance.h"
+ #include "vpu_iris3_buffer.h"
++#include "iris_av1_buffer.h"
+ 
+ static u32 dec_bin_size_iris3(struct iris_inst *inst)
+ {
+@@ -30,6 +31,8 @@ static u32 dec_bin_size_iris3(struct iris_inst *inst)
+ 	else if (inst->codec == VP9)
+ 		size = hfi_buffer_bin_vp9d(width, height,
+ 					   num_vpp_pipes);
++	if (inst->codec == AV1)
++		size = hfi_buffer_bin_av1d(width, height, num_vpp_pipes);
+ 	return size;
+ }
+ 
+@@ -50,6 +53,11 @@ static u32 dec_comv_size_iris3(struct iris_inst *inst)
+ 	else if (inst->codec == HEVC)
+ 		size = hfi_buffer_comv_h265d(width, height, num_comv);
+ 
++	if (inst->codec == AV1) {
++		num_comv = 18;
++		if (!inst->cap[AV1_DRAP].value)
++			size = hfi_buffer_comv_av1d(width, height, num_comv);
++	}
+ 	inst->cap[NUM_COMV].value = num_comv;
+ 
+ 	return size;
+@@ -104,6 +112,8 @@ static u32 dec_line_size_iris3(struct iris_inst *inst)
+ 	else if (inst->codec == VP9)
+ 		size = hfi_buffer_line_vp9d(width, height, out_min_count,
+ 					    is_opb, num_vpp_pipes);
++	if (inst->codec == AV1)
++		size = hfi_buffer_line_av1d(width, height, is_opb, num_vpp_pipes);
+ 	return size;
+ }
+ 
+@@ -118,6 +128,13 @@ static u32 dec_persist_size_iris3(struct iris_inst *inst)
+ 	else if (inst->codec == VP9)
+ 		size = hfi_buffer_persist_vp9d();
+ 
++	if (inst->codec == AV1) {
++		if (inst->cap[AV1_DRAP].value)
++			size = hfi_buffer_persist_av1d(inst->cap[FRAME_WIDTH].max,
++				inst->cap[FRAME_HEIGHT].max, 16);
++		else
++			size = hfi_buffer_persist_av1d(0, 0, 0);
++	}
+ 	return size;
+ }
+ 
+@@ -343,6 +360,14 @@ static u32 enc_vpss_size_iris3(struct iris_inst *inst)
+ 	return size;
+ }
+ 
++static u32 dec_partial_size_iris3(struct iris_inst *inst)
++{
++	if (inst->codec != AV1)
++		return 0;
++	return hfi_buffer_ibc_av1d(inst->fmt_src->fmt.pix_mp.width,
++				inst->fmt_src->fmt.pix_mp.height);
++}
++
+ struct iris_buf_type_handle {
+ 	enum iris_buffer_type type;
+ 	u32 (*handle)(struct iris_inst *inst);
+@@ -361,6 +386,7 @@ int iris_int_buf_size_iris3(struct iris_inst *inst,
+ 		{BUF_NON_COMV,        dec_non_comv_size_iris3     },
+ 		{BUF_LINE,            dec_line_size_iris3         },
+ 		{BUF_PERSIST,         dec_persist_size_iris3      },
++		{BUF_PARTIAL,         dec_partial_size_iris3      },
+ 		{BUF_DPB,             dec_dpb_size_iris3          },
+ 	};
+ 	static const struct iris_buf_type_handle enc_internal_buf_type_handle[] = {
