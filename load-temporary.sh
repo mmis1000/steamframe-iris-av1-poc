@@ -97,6 +97,11 @@ for _ in {1..20}; do
 done
 v4l2-ctl -d /dev/video-dec0 --list-formats-out | tee "$STATE/formats.txt"
 grep -q AV01 "$STATE/formats.txt" || die 'Experimental driver did not advertise AV1.'
+# Select AV1 on this descriptor before checking its decoded output formats.
+v4l2-ctl -d /dev/video-dec0 \
+    --set-fmt-video-out=width=1920,height=1080,pixelformat=AV01 \
+    --list-formats | tee "$STATE/av1-capture-formats.txt"
+grep -q "'NV12'" "$STATE/av1-capture-formats.txt" || die 'AV1 capture formats do not include linear NV12.'
 sha256sum -c "$STATE/original.sha256"
 dmesg > "$STATE/dmesg-after.txt"
 trap - EXIT INT TERM

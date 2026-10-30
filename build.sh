@@ -9,7 +9,7 @@ HEADERS_URL=https://steamdeck-packages.steamos.cloud/archlinux-deckard-hotfixes/
 GCC_URL=https://mirrors.edge.kernel.org/pub/tools/crosstool/files/bin/x86_64/15.1.0/x86_64-gcc-15.1.0-nolibc-aarch64-linux.tar.xz
 HEADERS_SHA=6e0a89ca9a9963c437a18a7a88799e8bc95ac5310e416dcb8ef7ab814e30ea5c
 GCC_SHA=b36edb14d5fe6942dadeee2146ab278eab76924c0a7746b1e20b3b0afcc9be73
-PATCH_SHA=bb955c8f2ca4bbe54615c7a6c3b3697c85141cd0c5b9b44e40ffd33e75d08e21
+PATCH_SHA=d55ac87c73a3fbe4f6c9568ed0cbf04a39b2bdac09b7159b1431a485ae4fbdef
 HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 
