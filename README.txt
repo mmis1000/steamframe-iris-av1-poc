@@ -5,6 +5,27 @@ SteamOS kernel 6.18.0-g83913f38113c on aarch64. It performs no persistent module
 installation, firmware replacement, service enable/disable, initramfs update,
 or reboot. A different kernel needs a matching source/header port.
 
+DOWNLOAD A CI BUILD
+
+The Build Iris AV1 workflow runs on pushes to main, pull requests and manual
+dispatch from the Actions tab:
+  https://github.com/mmis1000/steamframe-iris-av1-poc/actions/workflows/build.yml
+
+Open a successful run and download the steamframe-iris-av1-arm64 artifact.
+Unzip it, then verify and extract the included archive:
+  sha256sum -c steamframe-iris-av1-6.18.0-g83913f38113c-arm64.tar.xz.sha256
+  tar -xJf steamframe-iris-av1-6.18.0-g83913f38113c-arm64.tar.xz
+
+Copy the extracted directory to the matching headset and follow COPY AND
+CHECK ON THE HEADSET and TEMPORARY LOAD below. The archive contains the
+module, loader, source patch, instructions, checksums and build provenance.
+CI runs the same pinned build.sh and checks both scripts with ShellCheck.
+It does not load a module or perform hardware playback tests.
+
+Pushing a version tag beginning with v also publishes the archive and its
+checksum as GitHub Release assets. Ordinary main builds remain available
+as Actions artifacts for 30 days; build logs are retained for 14 days.
+
 BUILD ON AN X86-64 LINUX HOST
 
 Dependencies (Debian/Ubuntu package names):

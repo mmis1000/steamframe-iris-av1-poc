@@ -1,0 +1,97 @@
+name: Build Iris AV1
+run-name: Build Steam Frame Iris AV1 module
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iris-av1-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      BUNDLE: steamframe-iris-av1-6.18.0-g83913f38113c-arm64
+      JOBS: '4'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set build directory
+        run: echo "WORK=$RUNNER_TEMP/iris-av1-build" >> "$GITHUB_ENV"
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git curl kmod zstd xz-utils shellcheck
+      - name: Check scripts
+        run: |
+          bash -n build.sh load-temporary.sh
+          shellcheck build.sh load-temporary.sh
+      - name: Build matching ARM64 module
+        run: bash build.sh "$WORK"
+      - name: Package module and temporary loader
+        run: |
+          mkdir -p "dist/$BUNDLE"
+          cp -a "$WORK/artifacts/." "dist/$BUNDLE/"
+          cp README.txt "dist/$BUNDLE/"
+          printf 'recipe_commit=%s\nrun=%s/%s/actions/runs/%s\n' \
+            "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" \
+            "$GITHUB_RUN_ID" > "dist/$BUNDLE/ci-build-info.txt"
+          (
+            cd "dist/$BUNDLE"
+            sha256sum -c SHA256SUMS
+            sha256sum load-temporary.sh README.txt build-info.txt ci-build-info.txt >> SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+          tar -cJf "dist/$BUNDLE.tar.xz" -C dist "$BUNDLE"
+          (cd dist && sha256sum "$BUNDLE.tar.xz" > "$BUNDLE.tar.xz.sha256")
+          {
+            echo '### Steam Frame Iris AV1 build'
+            echo "- Recipe commit: $GITHUB_SHA"
+            echo '- Target: aarch64, kernel 6.18.0-g83913f38113c'
+            echo "- Download the steamframe-iris-av1-arm64 artifact for $BUNDLE.tar.xz and its checksum."
+            echo '- The archive includes the module, temporary loader, patch, checksums and instructions.'
+            echo '- CI validates compilation and packaging; hardware playback requires a headset test.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload driver bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: steamframe-iris-av1-arm64
+          path: |
+            dist/*.tar.xz
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: iris-av1-build-log
+          path: ${{ runner.temp }}/iris-av1-build/build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: steamframe-iris-av1-arm64
+          path: dist
+      - name: Publish tagged build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.xz dist/*.sha256 \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
